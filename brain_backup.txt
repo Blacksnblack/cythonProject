@@ -1,0 +1,336 @@
+import numpy as np
+from simplerandom.random import KISS as rand
+import time
+
+
+cdef class Brain:
+    cdef public Space [:,:] grid_view
+    cdef public Neuron [:] inputs, outputs
+    cdef bint running
+    cdef int numInputsActive, numOutputsActive, numInputValues
+    cdef public int WIDTH, HEIGHT, NUM_INPUTS, NUM_OUTPUTS, neuronCount, brainFillPercent
+    cdef int [:] inputValues
+
+    def __init__(self, size, num_inputs=4, num_outputs=2, brainFillPercent = 75):
+        # number of inputs = (actual#Inputs x #possibleInputValues)
+        self.WIDTH, self.HEIGHT = size
+        self.NUM_INPUTS, self.NUM_OUTPUTS = num_inputs, num_outputs
+        self.neuronCount, self.numInputsActive, self.numOutputsActive = 0, 0, 0
+        self.running = False
+        if brainFillPercent > 100:
+            brainFillPercent = 100
+        elif brainFillPercent < 0:
+            brainFillPercent = 0
+        self.brainFillPercent = int(100 - brainFillPercent)
+        temp1 = []
+        for i in range(self.HEIGHT): #row
+            temp2 = []
+            for j in range(self.WIDTH): #col
+                temp2.append(EmptySpace())
+            temp1.append(temp2)
+        self.grid_view = np.array(temp1)
+        self.inputValues = np.array([], dtype=int)
+        self.numInputValues = 0
+        temp = []
+        for i in range(self.NUM_INPUTS):
+            temp.append(EmptySpace())
+        self.inputs = np.array(temp)
+        temp = []
+        for i in range(self.NUM_OUTPUTS):
+            temp.append(EmptySpace())
+        self.outputs = np.array(temp)
+
+    cpdef void grow_neurons(self):
+        cdef int i
+        self.inputValues = np.empty(self.NUM_INPUTS, dtype=int)
+        for i in range(self.NUM_INPUTS):
+            self.inputValues[i] = 1
+        self.numInputValues = self.NUM_INPUTS
+
+    cpdef bint set_inputs(self, list values):
+        cdef int i
+        if len(values) != self.numInputsActive:
+            return False
+        self.inputValues = np.array(values, dtype=int)
+        self.numInputValues = len(values)
+        return True
+
+    cdef void do_input_neurons(self):
+        cdef int i
+        cdef Neuron n
+        for i in range(self.numInputValues):
+            if self.inputValues[i] == 1:
+                n = self.inputs[i]
+                n.give_energy(n.firingThreshold + 1)
+
+    cpdef bint is_element_instance_of_type(self, int x, int y, dtype):
+        if 0 <= x < self.HEIGHT and 0 <= y < self.WIDTH:
+            return isinstance(self.grid_view[x, y], dtype)
+
+    cpdef Space [:,:] test(self):
+        return self.grid_view
+
+    cpdef populate(self, int numStartingNeurons = -1):
+        cdef int chance, i, j
+        cdef Neuron n
+        rng = rand(time.time_ns())
+        for i in range(self.HEIGHT):
+            for j in range(self.WIDTH):
+                if isinstance(self.grid_view[i, j], EmptySpace):
+                    chance = int(rng.random() * 100)
+                    if chance > self.brainFillPercent:
+                        n = Neuron(self.neuronCount, i, j, self)
+                        if self.numInputsActive < self.NUM_INPUTS:
+                            n.isInput = True
+                            self.inputs[self.numInputsActive] = n
+                            self.numInputsActive += 1
+                            # set neuron to input
+                        self.grid_view[i, j] = n
+                        self.neuronCount += 1
+                else:
+                    print("Neurons already in brain")
+        # setting outputs (here because i need outputs far from inputs)
+        i = self.HEIGHT - 1
+        j = self.WIDTH - 1
+        while self.numOutputsActive < self.NUM_OUTPUTS:
+            if isinstance(self.grid_view[i, j], Neuron):
+                self.outputs[self.numOutputsActive] = self.grid_view[i, j]
+                self.numOutputsActive += 1
+                n = self.grid_view[i, j]
+                n.isOutput = True
+            j -= 1
+            if j < 0:
+                j = 0
+                i -= 1
+
+
+    cpdef int get_number_neurons(self):
+        cdef int count = 0
+        for i in range(self.HEIGHT):
+            for j in range(self.WIDTH):
+                if isinstance(self.grid_view[i, j], Neuron):
+                    count += 1
+        return count
+
+    cpdef void stop(self):
+        self.running = False
+
+    cpdef loop_no_while(self):
+        cdef int i, j, k
+        cdef bint outputFired
+        cdef Neuron element, tempNeuron
+        cdef int [:] outputVals
+        self.do_input_neurons()
+        for i in range(self.HEIGHT):
+            for j in range(self.WIDTH):
+                if isinstance(self.grid_view[i, j], Neuron):
+                    element = self.grid_view[i, j]
+                    outputFired = element.step()
+                    if outputFired:
+                        outputVals = np.empty(self.numOutputsActive, dtype=int)
+                        # print(f"Output Neuron {element.Neuron_ID} fired")
+                        for k in range(self.numOutputsActive):
+                            tempNeuron = self.outputs[k]
+                            if tempNeuron.Neuron_ID == element.Neuron_ID:
+                                outputVals[k] = 1
+                            else:
+                                outputVals[k] = 0
+                        return np.asarray(outputVals)
+
+    cpdef loop(self):
+        cdef int i, j, k
+        cdef bint outputFired
+        cdef Neuron element, tempNeuron
+        cdef int [:] outputVals
+        self.running = True
+        while self.running:
+            self.do_input_neurons()
+            for i in range(self.HEIGHT):
+                for j in range(self.WIDTH):
+                    if isinstance(self.grid_view[i, j], Neuron):
+                        element = self.grid_view[i, j]
+                        outputFired = element.step()
+                        if outputFired:
+                            outputVals = np.empty(self.numOutputsActive, dtype=int)
+                            # print(f"Output Neuron {element.Neuron_ID} fired")
+                            for k in range(self.numOutputsActive):
+                                tempNeuron = self.outputs[k]
+                                if tempNeuron.Neuron_ID == element.Neuron_ID:
+                                    outputVals[k] = 1
+                                else:
+                                    outputVals[k] = 0
+                            return np.asarray(outputVals)
+
+
+
+
+cdef class Space:
+    pass
+
+cdef class EmptySpace(Space):
+    def __repr__(self):
+        return "MT"
+
+    def __str__(self):
+        return "MT"
+
+cdef class Neuron(Space):
+    cdef:
+        Neuron [:] connections
+        public int Neuron_ID, X, Y, currentVoltage, usageMax, usageMin, usage, firingThreshold,
+        public int numConnections, maxConnections, outputVoltage, outputMax, outputMin
+        public bint isOutput, isInput
+        Brain brain
+
+    def __init__(self, Neuron_ID, X, Y, brain, neuronList = None):
+        self.Neuron_ID = Neuron_ID
+        self.X = X
+        self.Y = Y
+        self.brain = brain
+        self.currentVoltage = 0
+        self.isOutput = False
+        self.isInput = False
+        # --[VALUES TO PLAY WITH]--
+        self.maxConnections = 5
+        self.firingThreshold = self.numConnections
+        self.outputMin = (-2 * self.maxConnections) - 1
+        self.outputMax = (2 * self.maxConnections )  + 1
+        self.outputVoltage = int((self.outputMax + self.outputMin) / 2)  #  average of min and max # self.outputMin
+        self.usageMin = 25
+        self.usageMax = 50
+        self.usage = int((self.usageMax + self.usageMin) / 2)  # average of min and max
+        # --------------------------
+        self.connections = np.empty(self.maxConnections, dtype=Neuron)
+        self.numConnections = 0
+        if neuronList and len(neuronList) > 0:
+            for neuron in neuronList:
+                self.add_connection(neuron)
+
+    def __repr__(self):
+        return f"{self.Neuron_ID}:[{self.usage}/{self.usageMax},{self.outputVoltage}/{self.outputMax},{self.numConnections},{self.currentVoltage}/{self.firingThreshold}]"
+        # return str(self.Neuron_ID)
+
+    def __str__(self):
+        return f"{self.Neuron_ID}:[{self.usage}/{self.usageMax},{self.outputVoltage}/{self.outputMax},{self.numConnections},{self.currentVoltage}/{self.firingThreshold}]"
+
+    cpdef add_connection(self, Neuron n):
+        cdef Neuron [:] tempArr
+        cdef int i = 0
+        if self.numConnections < self.maxConnections:
+            self.connections[self.numConnections] = n
+            self.numConnections += 1
+            self.firingThreshold = self.numConnections
+
+    cpdef remove_connection(self, int connectionIndex):
+        if connectionIndex < self.numConnections-1:
+            self.connections[connectionIndex] = self.connections[self.numConnections-1]
+        self.numConnections -= 1
+
+    cdef void digress(self, int difference):
+        if self.numConnections == 0: # if there's no connections, no need to do any digression
+            return
+        # remove connections or decrease outgoing energy or both?
+        if self.numConnections >= self.maxConnections:
+            if self.outputVoltage <= self.outputMin:
+                self.digress_connection()
+                return
+            # decrease outgoing energy
+            if self.outputVoltage > self.outputMin:
+                self.outputVoltage -= difference
+                if self.outputVoltage < self.outputMin:
+                    self.outputVoltage = self.outputMin
+        else:
+            self.digress_connection()
+
+    cdef void growth(self, int difference):
+        if self.isOutput: # output neurons shouldn't grow
+            return
+        # grow connection or increase outgoing energy or both?
+        if self.numConnections < self.maxConnections: # if no connections, need to grow connections
+            self.growth_connection()
+        else:
+            # increase outgoing energy
+            if self.outputVoltage < self.outputMax:
+                self.outputVoltage += difference
+                if self.outputVoltage < self.outputMax:
+                    self.outputVoltage = self.outputMax
+
+    cdef void digress_connection(self):
+        cdef int i, lowestNeuronUsage, lowestNeuronUsageIndex
+        cdef Neuron n
+        lowestNeuronUsageIndex = -1
+        lowestNeuronUsage = 100000
+        for i in range(self.numConnections): # remove connected neuron with lowest usage
+            n = self.connections[i]
+            if n.usage < lowestNeuronUsage:
+                lowestNeuronUsage = n.usage
+                lowestNeuronUsageIndex = i
+        if lowestNeuronUsageIndex != -1:
+            self.remove_connection(lowestNeuronUsageIndex)
+
+    cdef void growth_connection(self):
+        # find nearest neuron that isn't already connected
+        cdef int best, distance, xIndex, yIndex, i, j, k, dX, dY
+        cdef bint isNotConnected
+        cdef Neuron neu, conNeu
+        i, j, k = 0 ,0 ,0
+        xIndex, yIndex = -1, -1
+        best = 1000000
+        for i in range(self.brain.HEIGHT): # loop through the memory_view grid
+            for j in range(self.brain.WIDTH): # of space objects
+                if isinstance(self.brain.grid_view[i, j], Neuron): # is the Space object a subclass of Neuron?
+                    isNotConnected = True # for checking if it's in connections already
+                    neu = self.brain.grid_view[i, j]  # get neuron obj
+                    # don't try to connect inputs or outputs unless its a regular neuron
+                    if (not self.isOutput and not self.isInput and not neu.isInput) or (not neu.isInput and not neu.isOutput):
+                        for k in range(self.numConnections): # loop through this neuron's connections (not neu)
+                            conNeu = self.connections[k]  # grab each connected neuron
+                            if conNeu.Neuron_ID == neu.Neuron_ID:  # if the neuron is in connections
+                                isNotConnected = False # don't even check distance
+                        if neu.Neuron_ID != self.Neuron_ID and isNotConnected: # not this neuron and isn't connected already
+                            dX = self.X - neu.X  # change in X
+                            dY = self.Y - neu.Y  # change in Y
+                            distance = (dX * dX) + (dY * dY) # calculating distance w/o sqrt
+                            if distance < best: # if distance is less than the current best
+                                best = distance # grab the distance
+                                xIndex = i      # and indexes
+                                yIndex = j
+        if xIndex != -1 and yIndex != -1: # xIndex, yIndex is closest Neuron (if not -1)
+            neu = self.brain.grid_view[xIndex, yIndex]
+            self.add_connection(neu) # create new connection
+
+    cpdef list get_connections(self):
+        return self.connections
+
+    cpdef bint step(self):
+        if self.currentVoltage > self.firingThreshold:
+            self.usage += 10
+            self.fire()
+            if self.isOutput: # outputs don't need to grow or digress so just return
+                return True  # return true so i can tell an output neuron fired
+        elif self.currentVoltage < self.firingThreshold:
+            self.usage -= 1
+        # check if need to grow or digress
+        if self.usage > self.usageMax:
+            self.growth(self.usageMax - self.usage)
+            self.usage = int((self.usageMax + self.usageMin) / 2)
+        elif self.usage < self.usageMin:
+            self.digress(self.usage - self.usageMin)
+            self.usage = int((self.usageMax + self.usageMin) / 2)
+
+        if not self.isOutput:
+            # calculate neural impact
+            #
+            pass
+        return False
+
+    cdef void fire(self):
+        cdef int i = 0
+        cdef Neuron n
+        for i in range(self.numConnections):
+            n = self.connections[i]
+            n.give_energy(self.outputVoltage)
+        self.currentVoltage = 0
+
+    cdef void give_energy(self, int value):
+        self.currentVoltage += value
