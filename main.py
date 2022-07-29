@@ -1,5 +1,5 @@
 import sys
-from Brain import Brain
+from Brain import Brain  # shows error but is fine; once cython takes over, Brain will be pulled from Brain.c
 import numpy as np
 from time import sleep
 from pprint import pprint
